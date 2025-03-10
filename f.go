@@ -93,7 +93,7 @@ func GetTranscript(b64File string) Transcript {
 				JSONSchema: openai.F(schemaParam),
 			},
 		),
-		Model: openai.F(openai.ChatModelGPT4oMini),
+		Model: openai.F(openai.ChatModelGPT4o),
 	})
 	if err != nil {
 		panic(err.Error())

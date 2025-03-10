@@ -4,7 +4,7 @@ go 1.22.5
 
 require (
 	github.com/invopop/jsonschema v0.12.0
-	github.com/openai/openai-go v0.1.0-alpha.37
+	github.com/openai/openai-go v0.1.0-alpha.62
 )
 
 require (
