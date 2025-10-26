@@ -1,17 +1,19 @@
 package main
 
 import (
+	"bytes"
 	"context"
 	"encoding/base64"
 	"encoding/json"
 	"flag"
 	"fmt"
+	"io"
+	"net/http"
 	"os"
 	"path/filepath"
 
 	"github.com/invopop/jsonschema"
-
-	openai "github.com/openai/openai-go" // imported as openai
+	// imported as openai
 )
 
 type Transcript struct {
@@ -33,7 +35,7 @@ func GenerateSchema[T any]() interface{} {
 }
 
 func main() {
-	apiKey := os.Getenv("OPENAI_API_KEY")
+	apiKey := os.Getenv("GROQ_API_KEY")
 	if apiKey == "" {
 		fmt.Println("no OPENAI_API_KEY in environment")
 		os.Exit(1)
@@ -73,40 +75,73 @@ func OldVersion() {
 }
 
 func GetTranscript(b64File string) Transcript {
-	schemaParam := openai.ResponseFormatJSONSchemaJSONSchemaParam{
-		Name:        openai.F("Transcript"),
-		Description: openai.F("Transcript of an image"),
-		Schema:      openai.F(TranscriptSchema),
-		Strict:      openai.Bool(true),
-	}
+	ctx := context.Background()
 
-	client := openai.NewClient()
-	chatCompletion, err := client.Chat.Completions.New(context.TODO(), openai.ChatCompletionNewParams{
-		Messages: openai.F([]openai.ChatCompletionMessageParamUnion{
-			openai.UserMessage("transcribe the following image:"),
-			openai.UserMessageParts(openai.ImagePart("data:image/jpeg;base64," + string(b64File))),
-		}),
-		MaxCompletionTokens: openai.F[int64](16384),
-		ResponseFormat: openai.F[openai.ChatCompletionNewParamsResponseFormatUnion](
-			openai.ResponseFormatJSONSchemaParam{
-				Type:       openai.F(openai.ResponseFormatJSONSchemaTypeJSONSchema),
-				JSONSchema: openai.F(schemaParam),
-			},
-		),
-		Model: openai.F(openai.ChatModelGPT4o),
-	})
+	data := []byte(fmt.Sprintf(`{
+  "messages": [
+    {
+      "role": "user",
+      "content": [
+	 	{
+	  		"type": "text",
+			"text": "Transcribe the following image"
+		},
+		{
+			"type": "image_url",
+			"image_url": {
+				"url": "data:image/jpeg;base64,%s"
+			}
+		}
+	  ]
+    }
+  ],
+  "model": "meta-llama/llama-4-maverick-17b-128e-instruct",
+  "temperature": 1,
+  "max_completion_tokens": 4096,
+  "top_p": 1,
+  "stream": false,
+  "response_format": {
+    "type": "json_schema",
+	"json_schema": {
+		"name": "transcript",
+		"schema": {
+			"type": "object",
+			"properties": {
+				"text": {"type": "string"}
+			}
+		}
+	}
+  },
+  "stop": null
+}
+	`, b64File))
+
+	req, _ := http.NewRequestWithContext(ctx, "POST", "https://api.groq.com/openai/v1/chat/completions", bytes.NewBuffer(data))
+	req.Header.Set("Authorization", "Bearer "+os.Getenv("GROQ_API_KEY"))
+	req.Header.Set("Content-Type", "application/json")
+
+	res, err := http.DefaultClient.Do(req)
 	if err != nil {
-		panic(err.Error())
+		panic(fmt.Sprintf("Groq API request failed: %v", err))
 	}
+	defer res.Body.Close()
 
-	r := Transcript{}
+	out, _ := io.ReadAll((res.Body))
 
-	err = json.Unmarshal([]byte(chatCompletion.Choices[0].Message.Content), &r)
-	if err != nil {
-		panic(err)
-	}
+	prettyJSON := map[string]any{}
 
-	return r
+	json.Unmarshal(out, &prettyJSON)
+	out, _ = json.MarshalIndent(prettyJSON, "", "    ")
+
+	choices := prettyJSON["choices"].([]interface{})
+	message := choices[0].(map[string]interface{})["message"].(map[string]interface{})
+	content := message["content"].(string)
+
+	fmt.Println(content)
+
+	t := Transcript{}
+	_ = json.Unmarshal([]byte(content), &t)
+	return t
 }
 
 func fileToB64(fname string) string {
