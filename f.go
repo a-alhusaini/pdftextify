@@ -71,7 +71,8 @@ func OldVersion() {
 
 	b64File := fileToB64(fname)
 
-	fmt.Println(GetTranscript(b64File))
+	ts := GetTranscript(b64File)
+	fmt.Println(ts)
 }
 
 func GetTranscript(b64File string) Transcript {
@@ -136,8 +137,6 @@ func GetTranscript(b64File string) Transcript {
 	choices := prettyJSON["choices"].([]interface{})
 	message := choices[0].(map[string]interface{})["message"].(map[string]interface{})
 	content := message["content"].(string)
-
-	fmt.Println(content)
 
 	t := Transcript{}
 	_ = json.Unmarshal([]byte(content), &t)
