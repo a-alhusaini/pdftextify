@@ -6,21 +6,42 @@ then
   exit 1
 fi
 
-mkdir ./outputs
-mkdir ./outputs/$1_data
-rm ./outputs/$1_data/*
+BASE_NAME=$(basename "$1" .pdf)
 
-F=0
+mkdir -p ./outputs/"${BASE_NAME}"_data
+rm -f ./outputs/"${BASE_NAME}"_data/*
 
-pdftoppm -jpeg "$1" ./outputs/$1_data/out
+pdftoppm -jpeg "$1" ./outputs/"${BASE_NAME}"_data/out
 
-while read -r file; do
-  go run f.go "$file" > "$file.txt" || F=1
-done < <(ls ./outputs/$1_data/out*jpg | sort)
+for file in ./outputs/"${BASE_NAME}"_data/out*.jpg; do
+  echo "Processing $file..."
+  
+  RETRY_DELAY=15
+  
+  while true; do
+    response=$(llm "transcribe the following document into clean markdown with no other output. Mark unclear sections with <<UNCLEAR>>" -a "$file" 2>err.log)
+    exit_code=$?
+    
+    if [ $exit_code -ne 0 ] || grep -qE "high demand|quota|429|ResourceExhausted" err.log; then
+      echo "Rate limit or API error detected (Exit: $exit_code). Log: $(cat err.log)"
+      echo "Waiting $RETRY_DELAY seconds before retrying $file..."
+      
+      sleep $RETRY_DELAY
+      RETRY_DELAY=$(( RETRY_DELAY * 2 ))
+      if [ $RETRY_DELAY -gt 120 ]; then
+        RETRY_DELAY=120
+      fi
+    else
+      echo "$response" > "$file.txt"
+      break
+    fi
+  done
 
-if [ $F -eq 1 ]
-then
-  exit 1
-fi
+  sleep 4  
+done
 
-cat ./outputs/$1_data/out*txt > $1.txt
+rm -f err.log
+
+cat $(ls -1 ./outputs/"${BASE_NAME}"_data/out*.txt | sort -V) > "${BASE_NAME}".txt
+
+echo "Done! Full text saved to ${BASE_NAME}.txt"
